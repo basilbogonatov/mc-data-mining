@@ -48,12 +48,63 @@ def parse_games(parsed_page):
 
     return parsed_games
 
+def get_game_page(game):
+    url = 'http://www.metacritic.com' + game[u'link']
+    req = urllib2.Request(url)
+    req.add_header('User-agent', 'Mozilla/5.0')
+    return BeautifulSoup(urllib2.urlopen(req).read(), 'html.parser')
+
+def strip_value(v):
+    if v != None:
+        return v.strip()
+    return v
+
+def parse_game_page(game):
+    page = get_game_page(game)
+    summary = page.find('div', class_='score_summary metascore_summary')
+    genre_block = page.find('li', class_='summary_detail product_genre')
+    publisher_block = page.find('li', class_='summary_detail publisher')
+    description_block = page.find('li', class_='summary_detail product_summary')
+
+    #some of those fields may be missing
+    try:
+        game[u'genre'] = genre_block.find('span', class_='data').string
+    except:
+        pass
+    try:
+        game[u'publisher'] = publisher_block.find('span', class_='data').span.string
+    except:
+        pass
+    try:
+        game[u'description'] = description_block.find('span', class_='data').find('span', class_='blurb blurb_expanded').string
+    except:
+        pass
+    try:
+        game[u'ms_review_count'] = summary.find('div', class_='summary').a.span.string
+    except:
+        pass
+
+    return dict(map(lambda (k,v): (k, strip_value(v)), game.iteritems()))
+
+def parse_game_page_serial(game):
+    res = {}
+    try:
+        res = parse_game_page(game)
+    except:
+        return game
+    else:
+        return res
+
 def serial_process(page_num):
     parsed_games = []
     try:
         parsed_games = parse_games(parse_page(page_num))
     except:
         pass
+
+    for i in range(len(parsed_games)):
+        parsed_games[i] = parse_game_page_serial(parsed_games[i])
+
     return parsed_games
 
 def merge_lists(parsed_games_list):
@@ -63,7 +114,7 @@ def merge_lists(parsed_games_list):
     return games
 
 def parallel_process(page_count):
-    pool = Pool(processes=8) #that's enough
+    pool = Pool(processes=16) #that's enough
     parsed_games_list = pool.map(serial_process, range(page_count))
 
     #retry once for missing pages
@@ -82,5 +133,6 @@ if __name__ == '__main__':
     else:
         sout = getwriter("utf8")(stdout)
         games = parallel_process(page_count)
+
         for game in games:
             sout.write(dumps(game, ensure_ascii=False) + "\n")
